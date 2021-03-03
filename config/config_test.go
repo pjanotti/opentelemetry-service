@@ -40,6 +40,7 @@ func TestDecodeConfig(t *testing.T) {
 	// Verify extensions.
 	assert.Equal(t, 3, len(config.Extensions))
 	assert.Equal(t, "some string", config.Extensions["exampleextension/1"].(*componenttest.ExampleExtensionCfg).ExtraSetting)
+	assert.Equal(t, "not present in the service", config.Extensions["exampleextension/disabled"].(*componenttest.ExampleExtensionCfg).ExtraSetting)
 
 	// Verify service.
 	assert.Equal(t, 2, len(config.Service.Extensions))
@@ -103,7 +104,7 @@ func TestDecodeConfig(t *testing.T) {
 		"Did not load exporter config correctly")
 
 	// Verify Processors
-	assert.Equal(t, 1, len(config.Processors), "Incorrect processors count")
+	assert.Equal(t, 3, len(config.Processors), "Incorrect processors count")
 
 	assert.Equal(t,
 		&componenttest.ExampleProcessorCfg{
@@ -124,7 +125,7 @@ func TestDecodeConfig(t *testing.T) {
 			Name:       "traces",
 			InputType:  configmodels.TracesDataType,
 			Receivers:  []string{"examplereceiver"},
-			Processors: []string{"exampleprocessor"},
+			Processors: []string{"exampleprocessor", "exampleprocessor/2"},
 			Exporters:  []string{"exampleexporter"},
 		},
 		config.Service.Pipelines["traces"],

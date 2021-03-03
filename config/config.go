@@ -122,6 +122,40 @@ func NewViper() *viper.Viper {
 	return viper.NewWithOptions(viper.KeyDelimiter(ViperDelimiter))
 }
 
+func getFromSource(params interface{}) interface{} {
+	m := params.(map[string]interface{})
+	key := m["key"].(string)
+	valueMap := map[string]interface{}{
+		"receivers_array":      []string{"examplereceiver"},
+		"single_param_section": map[string]interface{}{"extra": "some string"},
+		"value":                "not present in the service",
+		"unexpected_value":     "unexpected_value",
+		"receivers_section": map[string]interface{}{
+			"examplereceiver": nil,
+			"examplereceiver/myreceiver": map[string]interface{}{
+				"endpoint": "localhost:12345",
+				"extra":    "some string",
+			},
+		},
+		"exporters": map[string]interface{}{
+			"exporters": map[string]interface{}{
+				"exampleexporter/myexporter": map[string]interface{}{
+					"extra": "some export string 2",
+				},
+				"exampleexporter": nil,
+			},
+		},
+		"extra_processors": map[string]interface{}{
+			"processors": map[string]interface{}{
+				"exampleprocessor/1": nil,
+				"exampleprocessor/2": nil,
+			},
+		},
+	}
+
+	return valueMap[key]
+}
+
 // Load loads a Config from Viper.
 // After loading the config, need to check if it is valid by calling `ValidateConfig`.
 func Load(
@@ -131,7 +165,51 @@ func Load(
 
 	var config configmodels.Config
 
-	// Load the config.
+	// Expand any items in the config.
+	expandEnvConfig(v)
+
+	// Strip config sources keys
+	expandedTags := make(map[string]struct{})
+	cleanViper := NewViper()
+	for _, k := range v.AllKeys() {
+		if !strings.Contains(k, "$") {
+			cleanViper.Set(k, v.Get(k))
+		} else {
+			// For now assume just one prefixed tag
+			tagPrefixIdx := strings.Index(k, "$")
+			prefixToTagEndLen := strings.Index(k[tagPrefixIdx:], "::")
+			sourceKey := k[:tagPrefixIdx+prefixToTagEndLen]
+			if _, ok := expandedTags[sourceKey]; ok {
+				continue
+			}
+
+			expandedTags[sourceKey] = struct{}{}
+
+			// TODO: when getting the name of the config source ignore part after first ":" to allow multiple on root level
+			val := getFromSource(v.Get(sourceKey))
+			if sectionKeyLen := tagPrefixIdx - 2; sectionKeyLen > 0 { // TODO: simplify tagPrefixIdx > 2 or > 0
+				sectionKey := k[:sectionKeyLen]
+				cleanViper.Set(sectionKey, val)
+			} else {
+				// This is a top level key merge with the fragment from original configuration.
+				// TODO: type assert, this is at the root level it must be a map[string]interface{}
+				rootMap := val.(map[string]interface{})
+				// Set every top-level key.
+				for rootKey, rootValue := range rootMap {
+					// If key is already set merge the maps. TODO: Is this really needed/desired?
+					if prevMap := v.Get(rootKey); prevMap != nil {
+						if srcMap, ok := prevMap.(map[string]interface{}); ok {
+							if dstMap, ok := rootValue.(map[string]interface{}); ok {
+								deepConfigMapMerge(dstMap, srcMap)
+							}
+						}
+					}
+					cleanViper.Set(rootKey, rootValue)
+				}
+			}
+		}
+	}
+	v = cleanViper
 
 	// Struct to validate top level sections.
 	var rawCfg configSettings
@@ -182,6 +260,31 @@ func Load(
 	config.Service = service
 
 	return &config, nil
+}
+
+func deepConfigMapMerge(dst, src map[string]interface{}) {
+	for srcKey, srcVal := range src {
+		dstVal, ok := dst[srcKey]
+		if !ok {
+			// No conflict, this one doesn't exist on destination.
+			dst[srcKey] = dstVal
+			continue
+		}
+
+		srcMap, ok := srcVal.(map[string]interface{})
+		if !ok {
+			// Can only merge map[string]interface{}, in this case keep dest.
+			continue
+		}
+
+		dstMap, ok := dstVal.(map[string]interface{})
+		if !ok {
+			// Can only merge map[string]interface{}, in this case keep dest.
+			continue
+		}
+
+		deepConfigMapMerge(dstMap, srcMap)
+	}
 }
 
 // DecodeTypeAndName decodes a key in type[/name] format into type and fullName.
@@ -258,7 +361,7 @@ func loadExtensions(exts map[string]interface{}, factories map[configmodels.Type
 	// Iterate over extensions and create a config for each.
 	for key, value := range exts {
 		componentConfig := viperFromStringMap(cast.ToStringMap(value))
-		expandEnvConfig(componentConfig)
+		//expandEnvConfig(componentConfig)
 
 		// Decode the key into type and fullName components.
 		typeStr, fullName, err := DecodeTypeAndName(key)
@@ -330,7 +433,7 @@ func loadReceivers(recvs map[string]interface{}, factories map[configmodels.Type
 	// Iterate over input map and create a config for each.
 	for key, value := range recvs {
 		componentConfig := viperFromStringMap(cast.ToStringMap(value))
-		expandEnvConfig(componentConfig)
+		//expandEnvConfig(componentConfig)
 
 		// Decode the key into type and fullName components.
 		typeStr, fullName, err := DecodeTypeAndName(key)
@@ -367,7 +470,7 @@ func loadExporters(exps map[string]interface{}, factories map[configmodels.Type]
 	// Iterate over Exporters and create a config for each.
 	for key, value := range exps {
 		componentConfig := viperFromStringMap(cast.ToStringMap(value))
-		expandEnvConfig(componentConfig)
+		//expandEnvConfig(componentConfig)
 
 		// Decode the key into type and fullName components.
 		typeStr, fullName, err := DecodeTypeAndName(key)
@@ -410,7 +513,7 @@ func loadProcessors(procs map[string]interface{}, factories map[configmodels.Typ
 	// Iterate over processors and create a config for each.
 	for key, value := range procs {
 		componentConfig := viperFromStringMap(cast.ToStringMap(value))
-		expandEnvConfig(componentConfig)
+		//expandEnvConfig(componentConfig)
 
 		// Decode the key into type and fullName components.
 		typeStr, fullName, err := DecodeTypeAndName(key)
@@ -655,7 +758,8 @@ func validateExporters(cfg *configmodels.Config) error {
 // It does not expand the keys.
 func expandEnvConfig(v *viper.Viper) {
 	for _, k := range v.AllKeys() {
-		v.Set(k, expandStringValues(v.Get(k)))
+		val := v.Get(k)
+		v.Set(k, expandStringValues(val))
 	}
 }
 

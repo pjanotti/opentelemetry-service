@@ -1,29 +1,54 @@
+config_sources:
+  # The values below can still be retrieved from environment variables.
+  cfgsrc:
+    token: $CFG_SRC_TOKEN
+    path: api/v2/$ENV/otel-collector-cfg 
+  vault:
+    address: $VAULT_ADDRESS
+    token: $VAULT_TOKEN
+
+$plugin:
+  key: $ENV/otel-config
+
 receivers:
-  examplereceiver:
-  examplereceiver/myreceiver:
-    endpoint: "localhost:12345"
-    extra: "some string"
+#  examplereceiver:
+#  examplereceiver/myreceiver:
+#    endpoint: "localhost:12345"
+#    extra: "some string"
+  $plugin: { key: "receivers_section" }
 
 processors:
   exampleprocessor:
 
-exporters:
-  exampleexporter/myexporter:
-    extra: "some export string 2"
-  exampleexporter:
+$plugin:processors_section:
+  key: extra_processors
+
+#exporters:
+#  exampleexporter/myexporter:
+#    extra: "some export string 2"
+#  exampleexporter:
+$plugin:1:
+  key: exporters
 
 extensions:
   exampleextension/0:
   exampleextension/disabled:
-    extra: "not present in the service"
-  exampleextension/1:
-    extra: "some string"
+#    extra: "not present in the service"
+#    extra: { $plugin: { key: value, path: /var/log/tomcat/access.log } }
+    extra:
+      $plugin:
+        key: value
 
+  exampleextension/1:
+#    extra: "some string"
+    { $plugin: { template: "tomcat.yaml", key: single_param_section, path: /var/log/tomcat/access.log, other: 123} }
+    
 service:
   extensions: [exampleextension/0, exampleextension/1]
   pipelines:
     traces:
-      receivers: [examplereceiver]
-      processors: [exampleprocessor]
+#      receivers: [examplereceiver]
+      receivers: { $plugin: {key: receivers_array} } # can't do single element of an array
+      processors: [exampleprocessor, exampleprocessor/2]
       exporters: [exampleexporter]
 
