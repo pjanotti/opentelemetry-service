@@ -1,15 +1,3 @@
-config_sources:
-  # The values below can still be retrieved from environment variables.
-  cfgsrc:
-    token: $CFG_SRC_TOKEN
-    path: api/v2/$ENV/otel-collector-cfg 
-  vault:
-    address: $VAULT_ADDRESS
-    token: $VAULT_TOKEN
-
-$plugin:
-  key: $ENV/otel-config
-
 receivers:
 #  examplereceiver:
 #  examplereceiver/myreceiver:
@@ -27,7 +15,7 @@ $plugin:processors_section:
 #  exampleexporter/myexporter:
 #    extra: "some export string 2"
 #  exampleexporter:
-$plugin:1:
+$plugin:exporters_section:
   key: exporters
 
 extensions:
@@ -41,7 +29,7 @@ extensions:
 
   exampleextension/1:
 #    extra: "some string"
-    { $plugin: { template: "tomcat.yaml", key: single_param_section, path: /var/log/tomcat/access.log, other: 123} }
+    $plugin: { template: "tomcat.yaml", key: single_param_section, path: /var/log/tomcat/access.log, other: 123}
     
 service:
   extensions: [exampleextension/0, exampleextension/1]

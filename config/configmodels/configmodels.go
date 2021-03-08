@@ -33,6 +33,7 @@ the corresponding common settings struct (the easiest approach is to embed the c
 
 // Config defines the configuration for the various elements of collector or agent.
 type Config struct {
+	ConfigSources
 	Receivers
 	Exporters
 	Processors
@@ -49,6 +50,16 @@ type NamedEntity interface {
 	Name() string
 	SetName(name string)
 }
+
+// ConfigSource is the configuration of a configuration source. Specific configuration
+// sources must implement this interface and will typically embed ConfigSourceSettings
+// or a struct that extends it.
+type ConfigSource interface {
+	NamedEntity
+}
+
+// ConfigSources is a map of names to ConfigSource objects.
+type ConfigSources map[string]ConfigSource
 
 // Receiver is the configuration of a receiver. Specific receivers must implement this
 // interface and will typically embed ReceiverSettings struct or a struct that extends it.
@@ -215,9 +226,33 @@ func (ext *ExtensionSettings) SetName(name string) {
 	ext.NameVal = name
 }
 
-// Type sets the extension type.
+// Type gets the extension type.
 func (ext *ExtensionSettings) Type() Type {
 	return ext.TypeVal
 }
 
 var _ Extension = (*ExtensionSettings)(nil)
+
+// ConfigSourceSettings defines common settings for a configuration source.
+// Specific implementations can embed this struct and extend it with more fields if needed.
+type ConfigSourceSettings struct {
+	TypeVal Type   `mapstructure:"-"`
+	NameVal string `mapstructure:"-"`
+}
+
+// Name gets the configuration source name.
+func (css *ConfigSourceSettings) Name() string {
+	return css.NameVal
+}
+
+// SetName sets the configuration source name.
+func (css *ConfigSourceSettings) SetName(name string) {
+	css.NameVal = name
+}
+
+// Type gets the configuration source type.
+func (css *ConfigSourceSettings) Type() Type {
+	return css.TypeVal
+}
+
+var _ ConfigSource = (*ConfigSourceSettings)(nil)

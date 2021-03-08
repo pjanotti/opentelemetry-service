@@ -882,3 +882,8 @@ func viperFromStringMap(data map[string]interface{}) *viper.Viper {
 	_ = v.MergeConfigMap(cast.ToStringMap(data))
 	return v
 }
+
+// ApplySources apply the previously registered ConfigSources to the given viper object.
+func ApplySources(_ *viper.Viper) error {
+	return nil
+}

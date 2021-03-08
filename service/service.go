@@ -81,6 +81,8 @@ type Application struct {
 	factories component.Factories
 	config    *configmodels.Config
 
+	configSourcesFactories component.ConfigSourceFactories
+
 	// stopTestChan is used to terminate the application in end to end tests.
 	stopTestChan chan struct{}
 
@@ -107,8 +109,28 @@ type Parameters struct {
 	// The default factory loads the configuration file and overrides component's configuration
 	// properties supplied via --set command line flag.
 	ConfigFactory ConfigFactory
+	// ConfigSourcesFactory that creates the configuration for ConfigSource objects. The objects
+	// are used to retrieve values from external sources, K/V Stores, secret stores, etc. These
+	// objects are later used to resolve values in the configuration.
+	ConfigSourcesFactory ConfigSourcesFactory
 	// LoggingOptions provides a way to change behavior of zap logging.
 	LoggingOptions []zap.Option
+}
+
+// ConfigSourcesFactory create a config for ConfigSource objects.
+// The ConfigSourcesFactory implementation should call AddSetFlagProperties to enable configuration passed via `--set` flag.
+// Viper and command instances are passed from the Application.
+// The factories also belong to the Application and are equal to the factories passed via Parameters.
+type ConfigSourcesFactory func(
+	v *viper.Viper,
+	cmd *cobra.Command,
+	factories component.ConfigSourceFactories,
+) (*configmodels.ConfigSources, error)
+
+// FileLoaderConfigSourcesFactory implements ConfigSourcesFactory and creates ConfigSources configuration from a file
+// and from --set command line flag (if the flag is present).
+func FileLoaderConfigSourcesFactory(_ *viper.Viper, _ *cobra.Command, _ component.ConfigSourceFactories) (*configmodels.ConfigSources, error) {
+	return nil, nil
 }
 
 // ConfigFactory creates config.
@@ -135,6 +157,13 @@ func FileLoaderConfigFactory(v *viper.Viper, cmd *cobra.Command, factories compo
 	if err := AddSetFlagProperties(v, cmd); err != nil {
 		return nil, fmt.Errorf("failed to process set flag: %v", err)
 	}
+
+	// apply config sources to viper object.
+	// TODO: add context to the parameters
+	if err := config.ApplySources(v); err != nil {
+		return nil, fmt.Errorf("failed to apply config sources: %v", err)
+	}
+
 	return config.Load(v, factories)
 }
 
@@ -153,6 +182,11 @@ func New(params Parameters) (*Application, error) {
 		factory = FileLoaderConfigFactory
 	}
 
+	configSourcesFactory := params.ConfigSourcesFactory
+	if configSourcesFactory == nil {
+		configSourcesFactory = FileLoaderConfigSourcesFactory
+	}
+
 	rootCmd := &cobra.Command{
 		Use:  params.ApplicationStartInfo.ExeName,
 		Long: params.ApplicationStartInfo.LongName,
@@ -162,7 +196,7 @@ func New(params Parameters) (*Application, error) {
 				return err
 			}
 
-			err = app.execute(context.Background(), factory)
+			err = app.execute(context.Background(), factory, configSourcesFactory)
 			if err != nil {
 				return err
 			}
@@ -263,8 +297,10 @@ func (app *Application) setupTelemetry(ballastSizeBytes uint64) error {
 }
 
 // runAndWaitForShutdownEvent waits for one of the shutdown events that can happen.
-func (app *Application) runAndWaitForShutdownEvent() {
-	app.logger.Info("Everything is ready. Begin running and processing data.")
+func (app *Application) runAndWaitForShutdownEvent(ctx context.Context, factory ConfigFactory) {
+	// TODO: Placeholder for config update.
+	configLoadChannel := make(chan string, 1)
+	configLoadChannel <- "Initial configuration load"
 
 	// plug SIGTERM signal into a channel.
 	app.signalsChannel = make(chan os.Signal, 1)
@@ -273,15 +309,33 @@ func (app *Application) runAndWaitForShutdownEvent() {
 	// set the channel to stop testing.
 	app.stopTestChan = make(chan struct{})
 	app.stateChannel <- Running
-	select {
-	case err := <-app.asyncErrorChannel:
-		app.logger.Error("Asynchronous error received, terminating process", zap.Error(err))
-	case s := <-app.signalsChannel:
-		app.logger.Info("Received signal from OS", zap.String("signal", s.String()))
-	case <-app.stopTestChan:
-		app.logger.Info("Received stop test request")
-	}
+
+	app.MessageLoop(ctx, factory, configLoadChannel)
+
 	app.stateChannel <- Closing
+}
+
+func (app *Application) MessageLoop(ctx context.Context, factory ConfigFactory, configLoadChannel chan string) {
+	for {
+		select {
+		case desc := <-configLoadChannel:
+			app.logger.Info("Config load triggered", zap.String("reason", desc))
+			if err := app.LoadCollectionConfiguration(ctx, factory); err != nil {
+				app.logger.Error("Failed to load config", zap.Error(err))
+				return
+			}
+			app.logger.Info("Config load done. Running and processing data.")
+		case err := <-app.asyncErrorChannel:
+			app.logger.Error("Asynchronous error received, terminating process", zap.Error(err))
+			return
+		case s := <-app.signalsChannel:
+			app.logger.Info("Received signal from OS", zap.String("signal", s.String()))
+			return
+		case <-app.stopTestChan:
+			app.logger.Info("Received stop test request")
+			return
+		}
+	}
 }
 
 func (app *Application) setupConfigurationComponents(ctx context.Context, factory ConfigFactory) error {
@@ -407,7 +461,7 @@ func (app *Application) shutdownExtensions(ctx context.Context) error {
 	return nil
 }
 
-func (app *Application) execute(ctx context.Context, factory ConfigFactory) error {
+func (app *Application) execute(ctx context.Context, factory ConfigFactory, _ ConfigSourcesFactory) error {
 	app.logger.Info("Starting "+app.info.LongName+"...",
 		zap.String("Version", app.info.Version),
 		zap.String("GitHash", app.info.GitHash),
@@ -426,27 +480,34 @@ func (app *Application) execute(ctx context.Context, factory ConfigFactory) erro
 		return err
 	}
 
-	err = app.setupConfigurationComponents(ctx, factory)
-	if err != nil {
-		return err
-	}
-
-	err = app.builtExtensions.NotifyPipelineReady()
-	if err != nil {
-		return err
-	}
+	// Load ConfigSource objects.
+	// cfgSrcsConfig, err := configSourcesFactory(app.v, app.rootCmd, app.configSourcesFactories)
 
 	// Everything is ready, now run until an event requiring shutdown happens.
-	app.runAndWaitForShutdownEvent()
-
-	// Accumulate errors and proceed with shutting down remaining components.
-	var errs []error
+	app.runAndWaitForShutdownEvent(ctx, factory)
 
 	// Begin shutdown sequence.
 	runtime.KeepAlive(ballast)
 	app.logger.Info("Starting shutdown...")
 
-	err = app.builtExtensions.NotifyPipelineNotReady()
+	// Accumulate errors and proceed with shutting down remaining components.
+	errs := app.StopCollectionPipeline(ctx)
+
+	err = applicationTelemetry.shutdown()
+	if err != nil {
+		errs = append(errs, fmt.Errorf("failed to shutdown telemetry: %w", err))
+	}
+
+	app.logger.Info("Shutdown complete.")
+	app.stateChannel <- Closed
+	close(app.stateChannel)
+
+	return consumererror.CombineErrors(errs)
+}
+
+func (app *Application) StopCollectionPipeline(ctx context.Context) []error {
+	var errs []error
+	err := app.builtExtensions.NotifyPipelineNotReady()
 	if err != nil {
 		errs = append(errs, fmt.Errorf("failed to notify that pipeline is not ready: %w", err))
 	}
@@ -460,17 +521,22 @@ func (app *Application) execute(ctx context.Context, factory ConfigFactory) erro
 	if err != nil {
 		errs = append(errs, fmt.Errorf("failed to shutdown extensions: %w", err))
 	}
+	return errs
+}
 
-	err = applicationTelemetry.shutdown()
+func (app *Application) LoadCollectionConfiguration(ctx context.Context, factory ConfigFactory) error {
+	// TODO: Separating load config from starting components.
+	err := app.setupConfigurationComponents(ctx, factory)
 	if err != nil {
-		errs = append(errs, fmt.Errorf("failed to shutdown extensions: %w", err))
+		return err
 	}
 
-	app.logger.Info("Shutdown complete.")
-	app.stateChannel <- Closed
-	close(app.stateChannel)
+	err = app.builtExtensions.NotifyPipelineReady()
+	if err != nil {
+		return err
+	}
 
-	return consumererror.CombineErrors(errs)
+	return nil
 }
 
 // Run starts the collector according to the command and configuration

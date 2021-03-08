@@ -20,6 +20,9 @@ import (
 	"go.opentelemetry.io/collector/config/configmodels"
 )
 
+// ConfigSourceFactories holds the factories to create ConfigSource objects.
+type ConfigSourceFactories map[configmodels.Type]ConfigSourceFactory
+
 // Factories struct holds in a single type all component factories that
 // can be handled by the Config.
 type Factories struct {
