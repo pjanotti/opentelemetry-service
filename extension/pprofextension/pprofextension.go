@@ -16,16 +16,27 @@ package pprofextension
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	_ "net/http/pprof" // #nosec Needed to enable the performance profiler
 	"os"
 	"runtime"
 	"runtime/pprof"
+	"sync/atomic"
 
 	"go.uber.org/zap"
 
 	"go.opentelemetry.io/collector/component"
+)
+
+// Tracks that only a single instance is active per process.
+// See comment on Start method for the reasons for that.
+var instanceState int32
+
+const (
+	instanceNotRunning int32 = 0
+	instanceRunning    int32 = 1
 )
 
 type pprofExtension struct {
@@ -36,6 +47,15 @@ type pprofExtension struct {
 }
 
 func (p *pprofExtension) Start(_ context.Context, host component.Host) error {
+	// The runtime settings are global to the application, so while in principle it
+	// is possible to have more than one instance, running multiple will mean that
+	// the settings of the last started instance will prevail. In order to avoid
+	// this issue we will allow the start of a single instance once per process
+	// Summary: only a single instance can be running in the same process.
+	if !atomic.CompareAndSwapInt32(&instanceState, instanceNotRunning, instanceRunning) {
+		return errors.New("only a single pprof extension instance can be running per process")
+	}
+
 	// Start the listener here so we can have earlier failure if port is
 	// already in use.
 	ln, err := net.Listen("tcp", p.config.Endpoint)
@@ -67,9 +87,10 @@ func (p *pprofExtension) Start(_ context.Context, host component.Host) error {
 }
 
 func (p *pprofExtension) Shutdown(context.Context) error {
+	defer atomic.StoreInt32(&instanceState, instanceNotRunning)
 	if p.file != nil {
 		pprof.StopCPUProfile()
-		p.file.Close() // ignore the error
+		_ = p.file.Close() // ignore the error
 	}
 	return p.server.Close()
 }
