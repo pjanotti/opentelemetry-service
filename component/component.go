@@ -64,7 +64,13 @@ type Host interface {
 	// ReportFatalError is used to report to the host that the extension
 	// encountered a fatal error (i.e.: an error that the instance can't recover
 	// from) after its start function had already returned.
+	// Deprecated: Use ComponentFatalError.
 	ReportFatalError(err error)
+
+	// ComponentFatalError is used to report to the host that the extension
+	// encountered a fatal error (i.e.: an error that the instance can't recover
+	// from) after its start function had already returned.
+	ComponentFatalError(src Component, err error)
 
 	// GetFactory of the specified kind. Returns the factory for a component type.
 	// This allows components to create other components. For example:

@@ -65,7 +65,7 @@ func (r *pReceiver) Start(ctx context.Context, host component.Host) error {
 	go func() {
 		if err := discoveryManager.Run(); err != nil {
 			r.logger.Error("Discovery manager failed", zap.Error(err))
-			host.ReportFatalError(err)
+			host.ComponentFatalError(r, err)
 		}
 	}()
 
@@ -83,7 +83,7 @@ func (r *pReceiver) Start(ctx context.Context, host component.Host) error {
 	go func() {
 		if err := scrapeManager.Run(discoveryManager.SyncCh()); err != nil {
 			r.logger.Error("Scrape manager failed", zap.Error(err))
-			host.ReportFatalError(err)
+			host.ComponentFatalError(r, err)
 		}
 	}()
 	return nil

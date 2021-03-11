@@ -497,7 +497,7 @@ func (jr *jReceiver) startCollector(host component.Host) error {
 
 		go func() {
 			if err := jr.grpc.Serve(gln); err != nil {
-				host.ReportFatalError(err)
+				host.ComponentFatalError(jr, err)
 			}
 		}()
 	}

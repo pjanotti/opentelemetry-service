@@ -257,17 +257,17 @@ func (ocr *ocReceiver) startServer(host component.Host) error {
 		httpL := m.Match(cmux.Any())
 		go func() {
 			if errGrpc := ocr.serverGRPC.Serve(grpcL); errGrpc != nil {
-				host.ReportFatalError(errGrpc)
+				host.ComponentFatalError(ocr, err)
 			}
 		}()
 		go func() {
 			if errHTTP := ocr.httpServer().Serve(httpL); errHTTP != nil {
-				host.ReportFatalError(errHTTP)
+				host.ComponentFatalError(ocr, err)
 			}
 		}()
 		go func() {
 			if errServe := m.Serve(); errServe != nil {
-				host.ReportFatalError(errServe)
+				host.ComponentFatalError(ocr, err)
 			}
 		}()
 	})
