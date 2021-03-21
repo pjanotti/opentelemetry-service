@@ -73,6 +73,11 @@ type Application struct {
 	// signalsChannel is used to receive termination signals from the OS.
 	signalsChannel chan os.Signal
 
+	// configLoadChannel is used to signal that the configuration was updated and
+	// needs to be loaded. The string is a message describing the reason triggering
+	// the config load.
+	configLoadChannel chan string
+
 	// asyncErrorChannel is used to signal a fatal error from any component.
 	asyncErrorChannel chan error
 }
@@ -208,8 +213,10 @@ func (app *Application) setupTelemetry(ballastSizeBytes uint64) error {
 }
 
 // runAndWaitForShutdownEvent waits for one of the shutdown events that can happen.
-func (app *Application) runAndWaitForShutdownEvent() {
-	app.logger.Info("Everything is ready. Begin running and processing data.")
+func (app *Application) runAndWaitForShutdownEvent(ctx context.Context, factory ConfigFactory) {
+	// request the initial config load.
+	app.configLoadChannel = make(chan string, 1)
+	app.configLoadChannel <- "Initial configuration load"
 
 	// plug SIGTERM signal into a channel.
 	app.signalsChannel = make(chan os.Signal, 1)
@@ -217,16 +224,39 @@ func (app *Application) runAndWaitForShutdownEvent() {
 
 	// set the channel to stop testing.
 	app.stopTestChan = make(chan struct{})
-	app.stateChannel <- Running
-	select {
-	case err := <-app.asyncErrorChannel:
-		app.logger.Error("Asynchronous error received, terminating process", zap.Error(err))
-	case s := <-app.signalsChannel:
-		app.logger.Info("Received signal from OS", zap.String("signal", s.String()))
-	case <-app.stopTestChan:
-		app.logger.Info("Received stop test request")
-	}
+
+	app.messageLoop(ctx, factory)
+
 	app.stateChannel <- Closing
+}
+
+func (app *Application) messageLoop(ctx context.Context, factory ConfigFactory) {
+	firstCfgLoad := true
+	for {
+		select {
+		case desc := <-app.configLoadChannel:
+			app.logger.Info("Config load triggered", zap.String("reason", desc))
+			if err := app.setupConfigurationComponents(ctx, factory); err != nil {
+				app.logger.Error("Failed to load config", zap.Error(err))
+				return
+			}
+			app.logger.Info("Config load done. Running and processing data.")
+			if firstCfgLoad {
+				// Keeps same behavior of only declaring running when first config was loaded.
+				app.stateChannel <- Running
+				firstCfgLoad = false
+			}
+		case err := <-app.asyncErrorChannel:
+			app.logger.Error("Asynchronous error received, terminating process", zap.Error(err))
+			return
+		case s := <-app.signalsChannel:
+			app.logger.Info("Received signal from OS", zap.String("signal", s.String()))
+			return
+		case <-app.stopTestChan:
+			app.logger.Info("Received stop test request")
+			return
+		}
+	}
 }
 
 func (app *Application) setupConfigurationComponents(ctx context.Context, factory ConfigFactory) error {
@@ -243,17 +273,25 @@ func (app *Application) setupConfigurationComponents(ctx context.Context, factor
 
 	app.logger.Info("Applying configuration...")
 
-	app.service, err = newService(&settings{
+	service, err := newService(&settings{
 		Factories:         app.factories,
 		StartInfo:         app.info,
 		Config:            cfg,
 		Logger:            app.logger,
-		AsyncErrorChannel: app.asyncErrorChannel,
+		AsyncErrorChannel: app.asyncErrorChannel, // TODO: Review this usage.
 	})
 	if err != nil {
 		return err
 	}
 
+	if app.service != nil {
+		if err = app.service.Shutdown(ctx); err != nil {
+			return err
+		}
+	}
+
+	// Set the latest service and start it.
+	app.service = service
 	return app.service.Start(ctx)
 }
 
@@ -276,13 +314,8 @@ func (app *Application) execute(ctx context.Context, factory ConfigFactory) erro
 		return err
 	}
 
-	err = app.setupConfigurationComponents(ctx, factory)
-	if err != nil {
-		return err
-	}
-
 	// Everything is ready, now run until an event requiring shutdown happens.
-	app.runAndWaitForShutdownEvent()
+	app.runAndWaitForShutdownEvent(ctx, factory)
 
 	// Accumulate errors and proceed with shutting down remaining components.
 	var errs []error
@@ -291,8 +324,10 @@ func (app *Application) execute(ctx context.Context, factory ConfigFactory) erro
 	runtime.KeepAlive(ballast)
 	app.logger.Info("Starting shutdown...")
 
-	if err := app.service.Shutdown(ctx); err != nil {
-		errs = append(errs, fmt.Errorf("failed to shutdown service: %w", err))
+	if app.service != nil {
+		if err := app.service.Shutdown(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("failed to shutdown service: %w", err))
+		}
 	}
 
 	if err := applicationTelemetry.shutdown(); err != nil {
