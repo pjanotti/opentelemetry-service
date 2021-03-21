@@ -26,6 +26,7 @@ import (
 	"runtime"
 	"syscall"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
@@ -231,17 +232,51 @@ func (app *Application) runAndWaitForShutdownEvent(ctx context.Context, factory 
 }
 
 func (app *Application) messageLoop(ctx context.Context, factory ConfigFactory) {
-	firstCfgLoad := true
+	firstCfgLoad := true // Used to keep same behavior with stateChannel <- Running only after first config is loaded
+
+	// TODO: To be removed. Temporary watcher to help with manual validation
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		app.logger.Error("Failed to setup config file watcher, terminating process", zap.Error(err))
+		return
+	}
+	defer watcher.Close()
+
 	for {
 		select {
 		case desc := <-app.configLoadChannel:
 			app.logger.Info("Config load triggered", zap.String("reason", desc))
-			if err := app.setupConfigurationComponents(ctx, factory); err != nil {
+			if err = app.setupConfigurationComponents(ctx, factory); err != nil {
 				app.logger.Error("Failed to load config", zap.Error(err))
 				return
 			}
 			app.logger.Info("Config load done. Running and processing data.")
 			if firstCfgLoad {
+				// Temporary watcher to manually trigger config re-load.
+				cfgFile := builder.GetConfigFile()
+				if err = watcher.Add(cfgFile); err != nil {
+					app.logger.Error("Failed to add a watcher on the config file", zap.String("file", cfgFile), zap.Error(err))
+					return
+				}
+				go func() {
+					for {
+						select {
+						case event, ok := <-watcher.Events:
+							if !ok {
+								// closed just return
+								return
+							}
+							app.configLoadChannel <- fmt.Sprintf("config watcher event: %s", event.String())
+						case err, ok := <-watcher.Errors:
+							if !ok {
+								// closed just return
+								return
+							}
+							app.asyncErrorChannel <- fmt.Errorf("config file watcher error: %v", err)
+						}
+					}
+				}()
+
 				// Keeps same behavior of only declaring running when first config was loaded.
 				app.stateChannel <- Running
 				firstCfgLoad = false
