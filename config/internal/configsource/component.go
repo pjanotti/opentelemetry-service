@@ -83,5 +83,9 @@ type Retrieved struct {
 	//
 	// The method must return with a nil error when an update has happened to
 	// the value monitored by the Watcher.
-	WatchForUpdate func() error
+	WatchForUpdate
 }
+
+// WatchForUpdate defines the signature used by the method used to monitor for updates
+// on a retrieved configuration.
+type WatchForUpdate func() error
