@@ -8,15 +8,18 @@ import (
 
 type vaultConfigSource struct {
 	client *api.Client
+	path   string
 }
 
 var _ ConfigSource = (*vaultConfigSource)(nil)
 
 func (v *vaultConfigSource) NewSession(context.Context) (Session, error) {
-	panic("implement me")
+	return newSession(v.client, v.path)
 }
 
-func newConfigSource(address, token string) (*vaultConfigSource, error) {
+func newConfigSource(address, token, path string) (*vaultConfigSource, error) {
+	// Client doesn't connect on creation and can't be closed. Keeping the same instance is
+	// fine.
 	client, err := api.NewClient(&api.Config{
 		Address: address,
 	})
@@ -27,5 +30,6 @@ func newConfigSource(address, token string) (*vaultConfigSource, error) {
 	client.SetToken(token)
 	return &vaultConfigSource{
 		client: client,
+		path:   path,
 	}, nil
 }
