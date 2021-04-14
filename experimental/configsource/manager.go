@@ -299,7 +299,7 @@ func (m *Manager) Close(ctx context.Context) error {
 }
 
 func newManager(configSources map[string]ConfigSource) *Manager {
-	return  &Manager{
+	return &Manager{
 		configSources: configSources,
 		sessions:      make(map[string]Session),
 		watchingCh:    make(chan struct{}),
