@@ -23,6 +23,7 @@ import (
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config"
 	"go.opentelemetry.io/collector/consumer/consumererror"
+	"go.opentelemetry.io/collector/extension/zpagesextension"
 	"go.opentelemetry.io/collector/service/internal/builder"
 )
 
@@ -71,12 +72,6 @@ func newService(settings *settings) (*service, error) {
 		return nil, fmt.Errorf("invalid configuration: %w", err)
 	}
 
-	// Since it is not possible to register multiple zPages to the same path
-	// this effectively makes the service type a singleton.
-	if err := srv.registerZPages(); err != nil {
-		return nil, fmt.Errorf("cannot register service zPages: %w", err)
-	}
-
 	if err := srv.buildExtensions(); err != nil {
 		return nil, fmt.Errorf("cannot build extensions: %w", err)
 	}
@@ -88,16 +83,33 @@ func newService(settings *settings) (*service, error) {
 	return srv, nil
 }
 
-func (srv *service) Start(ctx context.Context) error {
-	if err := srv.startExtensions(ctx); err != nil {
-		return fmt.Errorf("cannot setup extensions: %w", err)
+func (srv *service) Start(ctx context.Context) (err error) {
+	// Since it is not possible to register multiple zPages to the same path
+	// this effectively enforces that only a single service can be in the "running"
+	// state.
+	if err = srv.registerZPages(); err != nil {
+		err = fmt.Errorf("cannot register service zPages: %w", err)
+		return
+	}
+	defer func() {
+		if err != nil {
+			// Clean-up registered zPages.
+			zpagesextension.UnregisterAllZPages()
+		}
+	}()
+
+	if err = srv.startExtensions(ctx); err != nil {
+		err = fmt.Errorf("cannot setup extensions: %w", err)
+		return
 	}
 
-	if err := srv.startPipelines(ctx); err != nil {
-		return fmt.Errorf("cannot setup pipelines: %w", err)
+	if err = srv.startPipelines(ctx); err != nil {
+		err = fmt.Errorf("cannot setup pipelines: %w", err)
+		return
 	}
 
-	return srv.builtExtensions.NotifyPipelineReady()
+	err = srv.builtExtensions.NotifyPipelineReady()
+	return
 }
 
 func (srv *service) Shutdown(ctx context.Context) error {
@@ -115,6 +127,8 @@ func (srv *service) Shutdown(ctx context.Context) error {
 	if err := srv.shutdownExtensions(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("failed to shutdown extensions: %w", err))
 	}
+
+	zpagesextension.UnregisterAllZPages()
 
 	return consumererror.Combine(errs)
 }
