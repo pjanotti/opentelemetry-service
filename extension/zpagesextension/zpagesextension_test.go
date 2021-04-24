@@ -39,6 +39,13 @@ func TestZPagesExtensionUsage(t *testing.T) {
 	zpagesExt := newServer(config, zap.NewNop())
 	require.NotNil(t, zpagesExt)
 
+	extraZPageMux := http.NewServeMux()
+	extraZPageMux.HandleFunc("/extraz", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("Ok"))
+	})
+	require.NoError(t, RegisterZPages(extraZPageMux))
+	defer UnregisterAllZPages()
+
 	require.NoError(t, zpagesExt.Start(context.Background(), componenttest.NewNopHost()))
 	t.Cleanup(func() { require.NoError(t, zpagesExt.Shutdown(context.Background())) })
 
@@ -48,8 +55,13 @@ func TestZPagesExtensionUsage(t *testing.T) {
 	_, zpagesPort, err := net.SplitHostPort(config.TCPAddr.Endpoint)
 	require.NoError(t, err)
 
+	assertZPage(t, zpagesPort, "/debug/tracez")
+	assertZPage(t, zpagesPort, "/debug/extraz")
+}
+
+func assertZPage(t *testing.T, zpagesPort, path string) {
 	client := &http.Client{}
-	resp, err := client.Get("http://localhost:" + zpagesPort + "/debug/tracez")
+	resp, err := client.Get("http://localhost:" + zpagesPort + path)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -86,8 +98,16 @@ func TestZPagesMultipleStarts(t *testing.T) {
 	require.NoError(t, zpagesExt.Start(context.Background(), componenttest.NewNopHost()))
 	t.Cleanup(func() { require.NoError(t, zpagesExt.Shutdown(context.Background())) })
 
-	// Try to start it again, it will fail since it is on the same endpoint.
-	require.Error(t, zpagesExt.Start(context.Background(), componenttest.NewNopHost()))
+	// Try to start a new instance: it will fail because only a single one is allowed.
+	sndCfg := Config{
+		TCPAddr: confignet.TCPAddr{
+			Endpoint: testutil.GetAvailableLocalAddress(t),
+		},
+	}
+	sndExt := newServer(sndCfg, zap.NewNop())
+
+	err := sndExt.Start(context.Background(), componenttest.NewNopHost())
+	require.Equal(t, errInstanceAlreadyRunning, err)
 }
 
 func TestZPagesMultipleShutdowns(t *testing.T) {

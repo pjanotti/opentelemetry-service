@@ -32,6 +32,9 @@ const (
 )
 
 func (srv *service) registerZPages() error {
+	// Unregister any previously registered zPages.
+	zpagesextension.UnregisterAllZPages()
+
 	mux := http.NewServeMux()
 	mux.HandleFunc(servicezPath, srv.handleServicezRequest)
 	mux.HandleFunc(pipelinezPath, srv.handlePipelinezRequest)

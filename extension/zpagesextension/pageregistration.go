@@ -28,7 +28,7 @@ const zPagesPathPrefix = "/debug"
 // zPagesMux combines all zpages registered to be exposed by the extension.
 var zPagesMux *http.ServeMux
 
-var errInstanceAlreadyStarted = errors.New("cannot register zPages when the extension is already started")
+var errExtensionAlreadyStarted = errors.New("cannot register zPages when the extension is already started")
 
 // Private error type to help with testability but with dynamic message.
 type errServerMuxPanic struct{ error }
@@ -42,9 +42,12 @@ func init() {
 // is started. Since the callers don't have the extension instance this is a
 // static function making the registration of zPages global to the whole package
 // which forces the extension to support only a single running instance.
+//
+// Components adding zPages must use path starting with "/" any prefix added by
+// the zPages extension will be removed before reaching the component's mux handlers.
 func RegisterZPages(mux *http.ServeMux) (err error) {
 	if atomic.LoadPointer(activeInstancePtr) != nil {
-		return errInstanceAlreadyStarted
+		return errExtensionAlreadyStarted
 	}
 
 	// http.ServerMux panics instead of returning an error. Add a deferred func
