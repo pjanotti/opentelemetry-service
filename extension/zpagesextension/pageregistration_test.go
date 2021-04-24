@@ -21,10 +21,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/config/confignet"
 	"go.opentelemetry.io/collector/testutil"
-	"go.uber.org/zap"
 )
 
 func TestZPagesRegisterZPages_RecoverMuxPanic(t *testing.T) {

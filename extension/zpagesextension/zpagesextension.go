@@ -43,6 +43,8 @@ type zpagesExtension struct {
 }
 
 func (zpe *zpagesExtension) Start(_ context.Context, host component.Host) error {
+	// The extension shares a global Mux with all registered zPages only a single instance can be started.
+	// #nosec G103
 	if !atomic.CompareAndSwapPointer(activeInstancePtr, nil, unsafe.Pointer(zpe)) {
 		return errInstanceAlreadyRunning
 	}
