@@ -17,7 +17,7 @@ package service
 import (
 	"context"
 	"fmt"
-
+	"go.opentelemetry.io/collector/extension/zpagesextension"
 	"go.uber.org/zap"
 
 	"go.opentelemetry.io/collector/component"
@@ -69,6 +69,13 @@ func newService(settings *settings) (*service, error) {
 
 	if err := srv.config.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid configuration: %w", err)
+	}
+
+	// Since it is not possible to register multiple zPages to the same path
+	// this effectively makes the service type a singleton.
+	zpagesextension.UnregisterAllZPages()
+	if err := srv.registerZPages(); err != nil {
+		return nil, fmt.Errorf("cannot register service zpages: %w", err)
 	}
 
 	if err := srv.buildExtensions(); err != nil {

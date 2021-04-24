@@ -16,10 +16,10 @@ package service
 
 import (
 	"net/http"
-	"path"
 	"sort"
 
 	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/extension/zpagesextension"
 	"go.opentelemetry.io/collector/internal/version"
 	"go.opentelemetry.io/collector/service/internal/zpages"
 )
@@ -31,12 +31,15 @@ const (
 	zExtensionName = "zextensionname"
 )
 
-func (srv *service) RegisterZPages(mux *http.ServeMux, pathPrefix string) {
-	mux.HandleFunc(path.Join(pathPrefix, servicezPath), srv.handleServicezRequest)
-	mux.HandleFunc(path.Join(pathPrefix, pipelinezPath), srv.handlePipelinezRequest)
-	mux.HandleFunc(path.Join(pathPrefix, extensionzPath), func(w http.ResponseWriter, r *http.Request) {
+func (srv *service) registerZPages() error {
+	mux := http.NewServeMux()
+	mux.HandleFunc(servicezPath, srv.handleServicezRequest)
+	mux.HandleFunc(pipelinezPath, srv.handlePipelinezRequest)
+	mux.HandleFunc(extensionzPath, func(w http.ResponseWriter, r *http.Request) {
 		handleExtensionzRequest(srv, w, r)
 	})
+
+	return zpagesextension.RegisterZPages(mux)
 }
 
 func (srv *service) handleServicezRequest(w http.ResponseWriter, r *http.Request) {

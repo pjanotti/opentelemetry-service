@@ -41,9 +41,9 @@ import (
 )
 
 const (
-	servicezPath   = "servicez"
-	pipelinezPath  = "pipelinez"
-	extensionzPath = "extensionz"
+	servicezPath   = "/servicez"
+	pipelinezPath  = "/pipelinez"
+	extensionzPath = "/extensionz"
 )
 
 // State defines Application's state.

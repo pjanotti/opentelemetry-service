@@ -16,13 +16,24 @@ package zpagesextension
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"sync/atomic"
+	"unsafe"
 
-	"go.opencensus.io/zpages"
 	"go.uber.org/zap"
 
 	"go.opentelemetry.io/collector/component"
 )
+
+// Tracks that only a single instance is active per process.
+// See comment on RegisterZPages function for the reasons for that.
+var activeInstance *zpagesExtension
+
+// #nosec G103
+var activeInstancePtr = (*unsafe.Pointer)(unsafe.Pointer(&activeInstance))
+
+var errInstanceAlreadyRunning = errors.New("only a single zPages extension instance can be running per process")
 
 type zpagesExtension struct {
 	config Config
@@ -32,23 +43,15 @@ type zpagesExtension struct {
 }
 
 func (zpe *zpagesExtension) Start(_ context.Context, host component.Host) error {
-	zPagesMux := http.NewServeMux()
-	zpages.Handle(zPagesMux, "/debug")
-
-	hostZPages, ok := host.(interface {
-		RegisterZPages(mux *http.ServeMux, pathPrefix string)
-	})
-	if ok {
-		zpe.logger.Info("Register Host's zPages")
-		hostZPages.RegisterZPages(zPagesMux, "/debug")
-	} else {
-		zpe.logger.Info("Host's zPages not available")
+	if !atomic.CompareAndSwapPointer(activeInstancePtr, nil, unsafe.Pointer(zpe)) {
+		return errInstanceAlreadyRunning
 	}
 
 	// Start the listener here so we can have earlier failure if port is
 	// already in use.
 	ln, err := zpe.config.TCPAddr.Listen()
 	if err != nil {
+		atomic.StorePointer(activeInstancePtr, nil)
 		return err
 	}
 
@@ -57,8 +60,9 @@ func (zpe *zpagesExtension) Start(_ context.Context, host component.Host) error 
 	zpe.stopCh = make(chan struct{})
 	go func() {
 		defer close(zpe.stopCh)
+		defer atomic.StorePointer(activeInstancePtr, nil)
 
-		if err := zpe.server.Serve(ln); err != nil && err != http.ErrServerClosed {
+		if err := zpe.server.Serve(ln); err != http.ErrServerClosed {
 			host.ReportFatalError(err)
 		}
 	}()
