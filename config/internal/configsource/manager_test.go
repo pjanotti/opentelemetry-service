@@ -194,8 +194,12 @@ func TestConfigSourceManager_ParamsHandling(t *testing.T) {
 	}
 
 	// Set OnRetrieve to check if the parameters were parsed as expected.
-	tstCfgSrc.OnRetrieve = func(ctx context.Context, selector string, params interface{}) error {
-		assert.Equal(t, tstCfgSrc.ValueMap[selector].Value, params)
+	tstCfgSrc.OnRetrieve = func(ctx context.Context, selector string, paramsParser *configparser.Parser) error {
+		value := (interface{})(nil)
+		if paramsParser != nil {
+			value = paramsParser.ToStringMap()
+		}
+		assert.Equal(t, tstCfgSrc.ValueMap[selector].Value, value)
 		return nil
 	}
 
@@ -337,9 +341,9 @@ func TestConfigSourceManager_EnvVarHandling(t *testing.T) {
 	}
 
 	// Intercept "params_key" and create an entry with the params themselves.
-	tstCfgSrc.OnRetrieve = func(ctx context.Context, selector string, params interface{}) error {
+	tstCfgSrc.OnRetrieve = func(ctx context.Context, selector string, paramsParser *configparser.Parser) error {
 		if selector == "params_key" {
-			tstCfgSrc.ValueMap[selector] = valueEntry{Value: params}
+			tstCfgSrc.ValueMap[selector] = valueEntry{Value: paramsParser.ToStringMap()}
 		}
 		return nil
 	}
@@ -545,16 +549,21 @@ func Test_parseCfgSrc(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfgSrcName, selector, params, err := parseCfgSrc(tt.str)
+			cfgSrcName, selector, paramsParser, err := parseCfgSrc(tt.str)
 			if tt.wantErr {
 				assert.Error(t, err)
 				return
 			}
 
+			paramsValue := (interface{})(nil)
+			if paramsParser != nil {
+				paramsValue = paramsParser.ToStringMap()
+			}
+
 			assert.NoError(t, err)
 			assert.Equal(t, tt.cfgSrcName, cfgSrcName)
 			assert.Equal(t, tt.selector, selector)
-			assert.Equal(t, tt.params, params)
+			assert.Equal(t, tt.params, paramsValue)
 		})
 	}
 }
@@ -568,7 +577,7 @@ type testConfigSource struct {
 	ErrOnRetrieveEnd error
 	ErrOnClose       error
 
-	OnRetrieve func(ctx context.Context, selector string, params interface{}) error
+	OnRetrieve func(ctx context.Context, selector string, paramsParser *configparser.Parser) error
 }
 
 type valueEntry struct {
@@ -586,9 +595,9 @@ func (t *testConfigSource) NewSession(context.Context) (configsource.Session, er
 	return t, nil
 }
 
-func (t *testConfigSource) Retrieve(ctx context.Context, selector string, params interface{}) (configsource.Retrieved, error) {
+func (t *testConfigSource) Retrieve(ctx context.Context, selector string, paramsParser *configparser.Parser) (configsource.Retrieved, error) {
 	if t.OnRetrieve != nil {
-		if err := t.OnRetrieve(ctx, selector, params); err != nil {
+		if err := t.OnRetrieve(ctx, selector, paramsParser); err != nil {
 			return nil, err
 		}
 	}
