@@ -25,22 +25,10 @@ jobs:
     env:
       PR_HEAD: ${{ github.event.pull_request.head.sha }}
     steps:
-      - name: Checkout Repo
-        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      - name: Setup repo and Go
+        uses: ./github/actions/setup-repo-and-go
         with:
-          fetch-depth: 0
-      - name: Setup Go
-        uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
-        with:
-          go-version: ~1.21.5
-      - name: Cache Go
-        id: go-cache
-        uses: actions/cache@ab5e6d0c87105b4c9c2047343972218f562e4319 # v4.0.1
-        with:
-          path: |
-            ~/go/bin
-            ~/go/pkg/mod
-          key: changelog-${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          setup-go-cache: true
 
       - name: Ensure no changes to the CHANGELOG.md or CHANGELOG-API.md
         run: |

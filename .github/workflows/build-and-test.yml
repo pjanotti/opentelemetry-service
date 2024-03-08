@@ -14,23 +14,14 @@ jobs:
   setup-environment:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Repo
-        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
-      - name: Setup Go
-        uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
+      - name: Setup repo and Go
+        id: setup-repo-and-go
+        uses: ./github/actions/setup-repo-and-go
         with:
           go-version: ~1.21.8
-          cache: false
-      - name: Cache Go
-        id: go-cache
-        uses: actions/cache@ab5e6d0c87105b4c9c2047343972218f562e4319 # v4.0.1
-        with:
-          path: |
-            ~/go/bin
-            ~/go/pkg/mod
-          key: go-cache-${{ runner.os }}-${{ hashFiles('**/go.sum') }}
+
       - name: Install dependencies
-        if: steps.go-cache.outputs.cache-hit != 'true'
+        if: steps.setup-repo-and-go.outputs.cache-go-modules-hit != 'true'
         run: make gomoddownload
 
   lint:
