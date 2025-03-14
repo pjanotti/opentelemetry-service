@@ -7,6 +7,7 @@ on:
   merge_group:
     types: [checks_requested]
   pull_request:
+  workflow_dispatch: # Just for testing purposes
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
@@ -77,6 +78,13 @@ jobs:
       - name: Install otelcorecol as a service
         run: |
           New-Service -Name "otelcorecol" -StartupType "Manual" -BinaryPathName "${PWD}\bin\otelcorecol_windows_amd64 --config ${PWD}\examples\local\otel-config.yaml"
+          eventcreate.exe /t information /id 1 /l application /d "Creating event provider for 'otelcorecol'" /so otelcorecol
+          if ($LastExitCode -eq 0) { exit 0 }
+          Write-Host "Hit issue #12422 collecting info for investigation"
+          Get-Service -Name EventLog
+          $currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent()); `
+          Write-Host "Running as admin: $($currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))"
+          Start-Sleep -Seconds 10
           eventcreate.exe /t information /id 1 /l application /d "Creating event provider for 'otelcorecol'" /so otelcorecol
 
       - name: Test otelcorecol service
