@@ -28,3 +28,5 @@ jobs:
         run: "dir Env:"
       - name: Where make
         run: where.exe make
+      - name: c:\mingw64\
+        run: dir c:\mingw64
